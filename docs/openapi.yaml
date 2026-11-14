@@ -1,0 +1,886 @@
+openapi: 3.0.3
+info:
+  title: Mini Wallet API
+  version: 0.1.0
+  description: |
+    REST API for Mini Wallet, a small e-wallet built to practise enterprise backend patterns:
+    pessimistic locking, idempotency keys, double-entry ledger and the outbox pattern.
+
+    - All amounts are integers in VND (dong). No decimals.
+    - All timestamps are ISO 8601 in UTC.
+    - Errors follow RFC 9457 Problem Details with two extra fields: `code` and `traceId`.
+    - Endpoints that create money movements require an `Idempotency-Key` header.
+
+    See docs/PRD.md for business rules and docs/architecture.md for design details.
+servers:
+  - url: http://localhost:8080
+    description: Local
+tags:
+  - name: Auth
+  - name: Users
+  - name: Wallets
+  - name: Topups
+  - name: Payments
+    description: Called by the payment gateway, not by the frontend
+  - name: Transfers
+  - name: Transactions
+  - name: Admin
+    description: Post-MVP (F12)
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new customer and create an empty wallet
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Account and wallet created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: EMAIL_ALREADY_EXISTS or PHONE_ALREADY_EXISTS
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in with email and password
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Token pair issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Exchange a refresh token for a new token pair
+      description: Refresh tokens are single use. The old token is revoked when a new pair is issued.
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke a refresh token
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '204':
+          description: Token revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/users/me:
+    get:
+      tags: [Users]
+      summary: Get the current user profile
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/users/me/pin:
+    put:
+      tags: [Users]
+      summary: Set or change the transaction PIN
+      description: '`currentPin` is required when a PIN already exists.'
+      operationId: setPin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetPinRequest'
+      responses:
+        '204':
+          description: PIN saved
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/wallets/me:
+    get:
+      tags: [Wallets]
+      summary: Get the current user's wallet and balance
+      operationId: getMyWallet
+      responses:
+        '200':
+          description: Wallet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/topups:
+    post:
+      tags: [Topups]
+      summary: Create a top-up order and get a payment URL
+      description: Creates a PENDING transaction. The balance changes only after the gateway callback succeeds.
+      operationId: createTopup
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TopupRequest'
+      responses:
+        '201':
+          description: Top-up order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopupResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+  /api/v1/payments/mock-gateway/callback:
+    post:
+      tags: [Payments]
+      summary: Payment result callback from the mock gateway
+      description: |
+        Verified by `signature = hex(HMAC-SHA256(secret, orderId|providerRef|amount|status))`.
+        Safe to call more than once: a callback for an order that is no longer CREATED is acknowledged and ignored.
+      operationId: handleMockGatewayCallback
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentCallbackRequest'
+      responses:
+        '200':
+          description: Callback accepted (processed or ignored as a duplicate)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallbackAck'
+        '400':
+          description: Invalid signature or amount mismatch
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/v1/recipients/lookup:
+    get:
+      tags: [Transfers]
+      summary: Look up a recipient by phone number before transferring
+      operationId: lookupRecipient
+      parameters:
+        - name: phone
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '+84901234567'
+      responses:
+        '200':
+          description: Recipient found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipientResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/transfers:
+    post:
+      tags: [Transfers]
+      summary: Transfer money to another wallet
+      description: |
+        Locks both wallets in ascending id order, checks balance and daily limit, then writes the
+        transaction, two ledger entries and an outbox event in one database transaction.
+      operationId: createTransfer
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '201':
+          description: Transfer succeeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          description: SERVICE_BUSY, the wallet lock could not be acquired in time. Safe to retry with the same key.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/v1/transactions:
+    get:
+      tags: [Transactions]
+      summary: List the current user's transactions, newest first
+      operationId: listTransactions
+      parameters:
+        - name: type
+          in: query
+          schema:
+            $ref: '#/components/schemas/TransactionType'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TransactionStatus'
+        - name: from
+          in: query
+          description: Inclusive start date, Vietnam time (UTC+7)
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: Inclusive end date, Vietnam time (UTC+7)
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: One page of transactions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/transactions/{id}:
+    get:
+      tags: [Transactions]
+      summary: Get one transaction of the current user
+      description: Returns 404 for transactions that belong to someone else.
+      operationId: getTransaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Transaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/admin/wallets/{id}:
+    get:
+      tags: [Admin]
+      summary: Get any wallet (admin only)
+      operationId: adminGetWallet
+      parameters:
+        - $ref: '#/components/parameters/WalletId'
+      responses:
+        '200':
+          description: Wallet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminWalletResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/admin/wallets/{id}/status:
+    patch:
+      tags: [Admin]
+      summary: Lock or unlock a wallet (admin only)
+      description: Writes an audit log entry with the admin, reason and time.
+      operationId: adminUpdateWalletStatus
+      parameters:
+        - $ref: '#/components/parameters/WalletId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWalletStatusRequest'
+      responses:
+        '200':
+          description: Updated wallet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminWalletResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        UUID created by the client once per user action and reused on retries.
+        Same key and same body returns the original result. Same key with a different body returns
+        422 IDEMPOTENCY_KEY_REUSED. A key still being processed returns 409 DUPLICATE_REQUEST.
+      schema:
+        type: string
+        format: uuid
+    WalletId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: VALIDATION_ERROR or IDEMPOTENCY_KEY_REQUIRED
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: INVALID_CREDENTIALS or INVALID_TOKEN
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: INVALID_PIN, PIN_LOCKED, PIN_NOT_SET, WALLET_LOCKED or ACCESS_DENIED
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: RECIPIENT_NOT_FOUND, TRANSACTION_NOT_FOUND or WALLET_NOT_FOUND
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: DUPLICATE_REQUEST
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unprocessable:
+      description: INSUFFICIENT_BALANCE, DAILY_LIMIT_EXCEEDED, AMOUNT_OUT_OF_RANGE, SELF_TRANSFER_NOT_ALLOWED or IDEMPOTENCY_KEY_REUSED
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    TooManyRequests:
+      description: RATE_LIMITED
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Amount:
+      type: integer
+      format: int64
+      description: Amount in VND (dong)
+      example: 150000
+
+    TransactionType:
+      type: string
+      enum: [TOPUP, TRANSFER]
+
+    TransactionStatus:
+      type: string
+      enum: [PENDING, SUCCESS, FAILED]
+
+    WalletStatus:
+      type: string
+      enum: [ACTIVE, LOCKED]
+
+    RegisterRequest:
+      type: object
+      required: [email, phone, fullName, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          example: khoa@example.com
+        phone:
+          type: string
+          description: Vietnamese mobile number, stored as +84...
+          example: '0901234567'
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Pham Khoa
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          description: At least one letter and one digit
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+
+    TokenResponse:
+      type: object
+      required: [accessToken, refreshToken, tokenType, expiresIn]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+          description: Access token lifetime in seconds
+          example: 900
+
+    UserResponse:
+      type: object
+      required: [id, email, phone, fullName, role, pinSet, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+          example: '+84901234567'
+        fullName:
+          type: string
+        role:
+          type: string
+          enum: [CUSTOMER, ADMIN]
+        pinSet:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    SetPinRequest:
+      type: object
+      required: [newPin]
+      properties:
+        currentPin:
+          type: string
+          pattern: '^\d{6}$'
+          nullable: true
+        newPin:
+          type: string
+          pattern: '^\d{6}$'
+
+    WalletResponse:
+      type: object
+      required: [id, balance, currency, status, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        balance:
+          $ref: '#/components/schemas/Amount'
+        currency:
+          type: string
+          example: VND
+        status:
+          $ref: '#/components/schemas/WalletStatus'
+        updatedAt:
+          type: string
+          format: date-time
+
+    TopupRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: integer
+          format: int64
+          minimum: 10000
+          maximum: 50000000
+          example: 500000
+
+    TopupResponse:
+      type: object
+      required: [transactionId, referenceCode, status, amount, paymentUrl, expiresAt]
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        referenceCode:
+          type: string
+          example: TX2611090001A3F
+        status:
+          $ref: '#/components/schemas/TransactionStatus'
+        amount:
+          $ref: '#/components/schemas/Amount'
+        paymentUrl:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
+
+    PaymentCallbackRequest:
+      type: object
+      required: [orderId, providerRef, amount, status, signature]
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        providerRef:
+          type: string
+          maxLength: 64
+        amount:
+          $ref: '#/components/schemas/Amount'
+        status:
+          type: string
+          enum: [SUCCESS, FAILED]
+        signature:
+          type: string
+          description: Hex HMAC-SHA256 of orderId|providerRef|amount|status
+
+    CallbackAck:
+      type: object
+      required: [received]
+      properties:
+        received:
+          type: boolean
+          example: true
+
+    RecipientResponse:
+      type: object
+      required: [phone, maskedName]
+      properties:
+        phone:
+          type: string
+          example: '+84907654321'
+        maskedName:
+          type: string
+          example: NGUYEN V*** A
+
+    TransferRequest:
+      type: object
+      required: [toPhone, amount, pin]
+      properties:
+        toPhone:
+          type: string
+          example: '0907654321'
+        amount:
+          type: integer
+          format: int64
+          minimum: 1000
+          maximum: 20000000
+          example: 30000
+        note:
+          type: string
+          maxLength: 100
+          example: Tien an trua
+        pin:
+          type: string
+          pattern: '^\d{6}$'
+          description: Not part of the idempotency request hash
+
+    Counterparty:
+      type: object
+      required: [phone, maskedName]
+      properties:
+        phone:
+          type: string
+        maskedName:
+          type: string
+
+    TransactionResponse:
+      type: object
+      required: [id, referenceCode, type, status, direction, amount, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        referenceCode:
+          type: string
+          example: TX2611090001A3F
+        type:
+          $ref: '#/components/schemas/TransactionType'
+        status:
+          $ref: '#/components/schemas/TransactionStatus'
+        direction:
+          type: string
+          enum: [IN, OUT]
+          description: Relative to the current user. Top-ups are always IN.
+        amount:
+          $ref: '#/components/schemas/Amount'
+        balanceAfter:
+          type: integer
+          format: int64
+          nullable: true
+          description: Current user's balance right after this transaction. Null unless SUCCESS.
+        counterparty:
+          allOf:
+            - $ref: '#/components/schemas/Counterparty'
+          nullable: true
+          description: The other user of a transfer. Null for top-ups.
+        note:
+          type: string
+          nullable: true
+        failureReason:
+          type: string
+          nullable: true
+          example: PAYMENT_EXPIRED
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    TransactionPage:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionResponse'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+
+    AdminWalletResponse:
+      type: object
+      required: [id, userId, ownerEmail, ownerPhone, balance, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        ownerEmail:
+          type: string
+          format: email
+        ownerPhone:
+          type: string
+        balance:
+          $ref: '#/components/schemas/Amount'
+        status:
+          $ref: '#/components/schemas/WalletStatus'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UpdateWalletStatusRequest:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          $ref: '#/components/schemas/WalletStatus'
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          example: amount
+        message:
+          type: string
+          example: must be greater than or equal to 1000
+
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details with project-specific code and traceId
+      required: [title, status, code, traceId]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://wallet.example.com/errors/insufficient-balance
+        title:
+          type: string
+          example: Insufficient balance
+        status:
+          type: integer
+          example: 422
+        detail:
+          type: string
+          example: Số dư không đủ để thực hiện giao dịch
+        instance:
+          type: string
+          example: /api/v1/transfers
+        code:
+          type: string
+          example: INSUFFICIENT_BALANCE
+        traceId:
+          type: string
+          example: 6f1c2a9b8e7d4c3b
+        errors:
+          type: array
+          description: Present only for VALIDATION_ERROR
+          items:
+            $ref: '#/components/schemas/FieldError'
