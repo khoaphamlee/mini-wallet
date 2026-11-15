@@ -62,7 +62,7 @@ Quy tắc phụ thuộc:
 Cấu trúc package mỗi module:
 
 ```
-com.khoapham.wallet.transfer
+com.khoaphamlee.wallet.transfer
   api/            TransferController, TransferRequest, TransactionResponse
   application/    TransferService (điều phối, @Transactional)
   domain/         TransferPolicy (quy tắc hạn mức, số tiền), các exception nghiệp vụ
