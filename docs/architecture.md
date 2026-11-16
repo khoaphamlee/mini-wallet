@@ -210,6 +210,8 @@ Mọi lỗi trả về theo chuẩn Problem Details (RFC 9457), Content-Type `ap
 | `INTERNAL_ERROR` | 500 |
 | `SERVICE_BUSY` | 503 |
 
+Lỗi HTTP chung do Spring tự sinh (405, 415, JSON không đọc được...) giữ nguyên status. Lỗi 400 dùng `code` là `VALIDATION_ERROR`, các status khác dùng tên HTTP status, ví dụ `METHOD_NOT_ALLOWED`.
+
 Một `@RestControllerAdvice` duy nhất trong `common` map exception sang bảng trên. Exception nghiệp vụ kế thừa một lớp `BusinessException` mang sẵn `ErrorCode`.
 
 ## 8. Logging và quan sát

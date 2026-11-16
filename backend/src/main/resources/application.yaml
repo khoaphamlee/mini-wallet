@@ -22,3 +22,8 @@ management:
     web:
       exposure:
         include: health,info
+
+logging:
+  pattern:
+    # Adds the trace id from TraceIdFilter to every log line, e.g. "INFO [6f1c2a9b8e7d4c3b]".
+    level: "%5p [%X{traceId:-}]"
