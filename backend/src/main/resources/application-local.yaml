@@ -1,0 +1,14 @@
+# Matches docker-compose.yml at the repository root.
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5433/wallet
+    username: wallet
+    password: wallet
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+logging:
+  level:
+    com.khoaphamlee.wallet: DEBUG
