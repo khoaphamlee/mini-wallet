@@ -17,5 +17,6 @@
 | [0003](adr/0003-pessimistic-locking-for-transfers.md) | Pessimistic locking cho chuyển tiền |
 | [0004](adr/0004-outbox-pattern.md) | Outbox pattern để phát sự kiện |
 | [0005](adr/0005-system-wallet.md) | Ví hệ thống cho tiền nạp vào, không khóa khi ghi |
+| [0006](adr/0006-self-issued-jwt.md) | Tự phát và kiểm tra JWT thay vì dùng Cognito/Keycloak (viết bằng tiếng Anh) |
 
 ADR mới: chép [adr/template.md](adr/template.md), đánh số tiếp theo. ADR đã chấp nhận thì không sửa nội dung; muốn đổi quyết định thì viết ADR mới và đánh dấu ADR cũ là "Bị thay thế bởi ADR xxxx".

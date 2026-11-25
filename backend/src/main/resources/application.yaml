@@ -17,6 +17,15 @@ spring:
 server:
   shutdown: graceful
 
+app:
+  jwt:
+    # The secret is set per profile: application-local.yaml for development, JWT_SECRET in production.
+    access-token-ttl: 15m
+    refresh-token-ttl: 7d
+  cors:
+    # Frontend origins allowed to call the API from a browser, comma-separated.
+    allowed-origins: http://localhost:5173
+
 management:
   endpoints:
     web:
