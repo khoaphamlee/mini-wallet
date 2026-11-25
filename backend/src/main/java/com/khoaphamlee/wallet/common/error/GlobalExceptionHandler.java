@@ -9,6 +9,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -34,6 +36,20 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     ResponseEntity<ProblemDetail> handleBusiness(BusinessException ex) {
         return ResponseEntity.status(ex.errorCode().status()).body(toProblem(ex.errorCode(), ex.getMessage()));
+    }
+
+    /** Missing, malformed or expired token. Sent here from Spring Security by SecurityProblemHandler. */
+    @ExceptionHandler(AuthenticationException.class)
+    ResponseEntity<ProblemDetail> handleAuthentication(AuthenticationException ex) {
+        ErrorCode errorCode = ErrorCode.INVALID_TOKEN;
+        return ResponseEntity.status(errorCode.status()).body(toProblem(errorCode, errorCode.title()));
+    }
+
+    /** Valid token, but the user's role is not allowed to call this endpoint. */
+    @ExceptionHandler(AccessDeniedException.class)
+    ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException ex) {
+        ErrorCode errorCode = ErrorCode.ACCESS_DENIED;
+        return ResponseEntity.status(errorCode.status()).body(toProblem(errorCode, errorCode.title()));
     }
 
     /** Anything we did not expect. Log the details, but never send them to the client. */

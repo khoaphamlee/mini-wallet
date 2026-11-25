@@ -9,6 +9,11 @@ spring:
       host: localhost
       port: 6379
 
+app:
+  jwt:
+    # Local development and tests only. Never reuse this value anywhere else.
+    secret: local-dev-secret-not-for-production-0123456789
+
 logging:
   level:
     com.khoaphamlee.wallet: DEBUG
