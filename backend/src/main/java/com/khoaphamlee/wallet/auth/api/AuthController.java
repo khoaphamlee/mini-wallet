@@ -1,5 +1,6 @@
 package com.khoaphamlee.wallet.auth.api;
 
+import com.khoaphamlee.wallet.auth.application.LoginService;
 import com.khoaphamlee.wallet.auth.application.RegistrationService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -9,15 +10,17 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Public authentication endpoints. Login, refresh and logout are added in issues #5 and #6. */
+/** Public authentication endpoints. Refresh and logout are added in issue #6. */
 @RestController
 @RequestMapping("/api/v1/auth")
 public class AuthController {
 
     private final RegistrationService registrationService;
+    private final LoginService loginService;
 
-    public AuthController(RegistrationService registrationService) {
+    public AuthController(RegistrationService registrationService, LoginService loginService) {
         this.registrationService = registrationService;
+        this.loginService = loginService;
     }
 
     @PostMapping("/register")
@@ -25,5 +28,10 @@ public class AuthController {
     public UserResponse register(@Valid @RequestBody RegisterRequest request) {
         return UserResponse.from(
                 registrationService.register(request.email(), request.phone(), request.fullName(), request.password()));
+    }
+
+    @PostMapping("/login")
+    public TokenResponse login(@Valid @RequestBody LoginRequest request) {
+        return TokenResponse.from(loginService.login(request.email(), request.password()));
     }
 }

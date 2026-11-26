@@ -1,6 +1,7 @@
 package com.khoaphamlee.wallet.auth.infra;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -45,5 +46,9 @@ public class JwtService {
                 .build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
         return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+    }
+
+    public Duration accessTokenTtl() {
+        return properties.accessTokenTtl();
     }
 }
