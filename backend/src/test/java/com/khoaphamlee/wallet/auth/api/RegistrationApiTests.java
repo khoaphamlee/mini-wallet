@@ -1,5 +1,7 @@
 package com.khoaphamlee.wallet.auth.api;
 
+import static com.khoaphamlee.wallet.auth.AuthTestData.randomEmail;
+import static com.khoaphamlee.wallet.auth.AuthTestData.randomPhone;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -11,8 +13,6 @@ import com.khoaphamlee.wallet.TestcontainersConfiguration;
 import com.khoaphamlee.wallet.auth.domain.User;
 import com.khoaphamlee.wallet.auth.infra.UserRepository;
 import com.khoaphamlee.wallet.common.web.TraceIdFilter;
-import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -109,14 +109,5 @@ class RegistrationApiTests {
         return mockMvc.perform(post("/api/v1/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body));
-    }
-
-    static String randomEmail() {
-        return "user-" + UUID.randomUUID() + "@example.com";
-    }
-
-    /** A random valid number like 0912345678, so tests never collide with each other. */
-    static String randomPhone() {
-        return "09" + String.format("%08d", ThreadLocalRandom.current().nextInt(100_000_000));
     }
 }
